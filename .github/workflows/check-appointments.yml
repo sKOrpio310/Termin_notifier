@@ -2,7 +2,11 @@ name: Check appointments
 
 on:
   schedule:
-    - cron: "*/15 * * * *" # every 15 minutes (UTC); don't go more frequent
+    # Every 5 minutes (GitHub's minimum). Cron is UTC-only, so this covers 06:00-16:00 Berlin
+    # time in both summer (UTC+2 = 04-14 UTC) and winter (UTC+1 = 05-15 UTC); the "window" step
+    # below skips anything outside 06:00-16:00 Europe/Berlin.
+    - cron: "*/5 4-14 * * *"
+    - cron: "0 15 * * *"
   workflow_dispatch:
     inputs:
       test_email:
@@ -22,18 +26,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - name: Check time window
+        id: window
+        run: |
+          # Scheduled runs only happen 06:00-16:00 Berlin time; manual runs always go through.
+          now=$(TZ=Europe/Berlin date +%H%M)
+          if [ "${{ github.event_name }}" != "schedule" ] || { [ "$((10#$now))" -ge 600 ] && [ "$((10#$now))" -le 1600 ]; }; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Berlin time is $now, outside 06:00-16:00: skipping"
+          fi
 
-      - uses: actions/setup-python@v5
+      - if: steps.window.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - if: steps.window.outputs.run == 'true'
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
 
-      - run: pip install -r requirements.txt
+      - if: steps.window.outputs.run == 'true'
+        run: pip install -r requirements.txt
 
-      - run: python -m playwright install --with-deps chromium
+      - if: steps.window.outputs.run == 'true'
+        run: python -m playwright install --with-deps chromium
 
       - name: Run check
+        if: steps.window.outputs.run == 'true'
         env:
           # Email backend: Gmail SMTP if GMAIL_APP_PASSWORD is set, otherwise Resend.
           GMAIL_USER: ${{ secrets.GMAIL_USER || vars.GMAIL_USER }}
@@ -51,7 +72,7 @@ jobs:
           fi
 
       - name: Upload screenshots
-        if: always()
+        if: always() && steps.window.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: screenshots
@@ -60,7 +81,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Commit status.json
-        if: always()
+        if: always() && steps.window.outputs.run == 'true'
         run: |
           if [ -f status.json ] && ! git diff --quiet -- status.json || [ -n "$(git ls-files --others --exclude-standard status.json)" ]; then
             git config user.name "github-actions[bot]"

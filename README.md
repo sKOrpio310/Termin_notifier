@@ -2,7 +2,7 @@
 
 Checks the Stuttgart Ausländerbehörde booking site for a free
 **"Verpflichtungserklärung abgeben" → "längerfristige Aufenthalte"** appointment every
-15 minutes via GitHub Actions and emails you (via Gmail SMTP or [Resend](https://resend.com)) when one opens up.
+5 minutes (06:00–16:00 Berlin time) via GitHub Actions and emails you (via Gmail SMTP or [Resend](https://resend.com)) when one opens up.
 
 - Script: `scripts/check_appointments.py` (Python + Playwright, headless Chromium). Prints `AVAILABLE` / `UNAVAILABLE`.
 - Workflow: `.github/workflows/check-appointments.yml`
@@ -58,11 +58,17 @@ Tick **test_email** to only send a test mail (verifies key and recipients withou
 Screenshots of every step are attached to each run as the `screenshots` artifact.
 
 ## Changing the schedule
-Edit the cron line in `.github/workflows/check-appointments.yml`:
+It currently runs **every 5 minutes between 06:00 and 16:00 Europe/Berlin time, every day**. Two places control this
+in `.github/workflows/check-appointments.yml`:
 
 ```yaml
-- cron: "*/15 * * * *"   # every 15 minutes (UTC) — please don't go lower
+- cron: "*/5 4-14 * * *"   # cron is UTC-only: this range covers the window in summer AND winter time
+- cron: "0 15 * * *"
 ```
+and the "Check time window" step, which skips scheduled runs outside 06:00–16:00 Berlin time
+(change `600` / `1600` there; e.g. `2200` for 22:00). To change the interval, edit the `*/5`
+(5 minutes is GitHub's minimum). To check around the clock, use `"*/5 * * * *"` and drop the window step's condition.
+Please stay polite to the site: don't go more frequent than 5 minutes.
 
 GitHub's scheduler is best-effort: runs can be delayed by several minutes at busy times. GitHub also disables
 scheduled workflows in repos with 60 days of no activity; re-enable them under the Actions tab if that happens.
