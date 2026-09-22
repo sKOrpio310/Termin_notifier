@@ -62,13 +62,18 @@ It currently runs **every 5 minutes between 06:00 and 16:00 Europe/Berlin time, 
 in `.github/workflows/check-appointments.yml`:
 
 ```yaml
-- cron: "*/5 4-14 * * *"   # cron is UTC-only: this range covers the window in summer AND winter time
-- cron: "0 15 * * *"
+- cron: "*/5 4-14 * * *"   # cron is UTC-only; tuned for summer (CEST, UTC+2)
 ```
 and the "Check time window" step, which skips scheduled runs outside 06:00–16:00 Berlin time
 (change `600` / `1600` there; e.g. `2200` for 22:00). To change the interval, edit the `*/5`
 (5 minutes is GitHub's minimum). To check around the clock, use `"*/5 * * * *"` and drop the window step's condition.
 Please stay polite to the site: don't go more frequent than 5 minutes.
+
+Note: the cron hours (`4-14`) are tuned for summer time (CEST, UTC+2). In winter (CET, UTC+1) the window
+shifts an hour later in UTC, so scheduled runs will only span roughly 07:00–17:00 Berlin time instead of
+06:00–16:00. The "window" step still enforces 06:00–16:00, so this only means slightly fewer checks near
+the very edges of the window in winter, never an alert sent outside it. Bump `4-14` to `3-15` in late October
+if you want the full window back over winter.
 
 GitHub's scheduler is best-effort: runs can be delayed by several minutes at busy times. GitHub also disables
 scheduled workflows in repos with 60 days of no activity; re-enable them under the Actions tab if that happens.

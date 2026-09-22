@@ -4,11 +4,12 @@ on:
   schedule:
     # NOTE: if this schedule stops firing after 60 days with no repo pushes/commits, GitHub
     # auto-disables it — re-enable it from the Actions tab, or push any commit to reactivate it.
-    # Every 5 minutes (GitHub's minimum). Cron is UTC-only, so this covers 06:00-16:00 Berlin
-    # time in both summer (UTC+2 = 04-14 UTC) and winter (UTC+1 = 05-15 UTC); the "window" step
-    # below skips anything outside 06:00-16:00 Europe/Berlin.
+    # Every 5 minutes (GitHub's minimum). Cron is UTC-only; 4-14 UTC covers 06:00-16:00 Berlin
+    # time in summer (UTC+2). In winter (UTC+1) the window shifts to 07:00-17:00 Berlin, i.e.
+    # runs will span 07:00-16:55 rather than exactly 06:00-16:00 during standard time — the
+    # "window" step below still enforces 06:00-16:00 Europe/Berlin, so no out-of-window email
+    # is ever sent either way, just fewer checks near the very start/end in winter.
     - cron: "*/5 4-14 * * *"
-    - cron: "0 15 * * *"
   workflow_dispatch:
     inputs:
       test_email:
