@@ -2,6 +2,8 @@ name: Check appointments
 
 on:
   schedule:
+    # NOTE: if this schedule stops firing after 60 days with no repo pushes/commits, GitHub
+    # auto-disables it — re-enable it from the Actions tab, or push any commit to reactivate it.
     # Every 5 minutes (GitHub's minimum). Cron is UTC-only, so this covers 06:00-16:00 Berlin
     # time in both summer (UTC+2 = 04-14 UTC) and winter (UTC+1 = 05-15 UTC); the "window" step
     # below skips anything outside 06:00-16:00 Europe/Berlin.
