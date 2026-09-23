@@ -82,17 +82,50 @@ def write_summary(result: str, details: str) -> None:
 # --------------------------------------------------------------------------- #
 # Browser flow
 # --------------------------------------------------------------------------- #
+def run_label() -> str:
+    """'Run #12 | id 345 | schedule | 2026-09-23 22:15:03 Berlin (20:15:03 UTC)' (or 'local run')."""
+    utc = datetime.now(timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        berlin = f"{utc.astimezone(ZoneInfo('Europe/Berlin')):%Y-%m-%d %H:%M:%S} Berlin ({utc:%H:%M:%S} UTC)"
+    except Exception:  # no tz database available
+        berlin = f"{utc:%Y-%m-%d %H:%M:%S} UTC"
+    if os.environ.get("GITHUB_RUN_ID"):
+        who = (f"Run #{os.environ.get('GITHUB_RUN_NUMBER')} | id {os.environ['GITHUB_RUN_ID']} | "
+               f"{os.environ.get('GITHUB_EVENT_NAME', '?')}")
+    else:
+        who = "local run"
+    return f"{who} | {berlin}"
+
+
+BANNER_JS = """text => {
+    document.getElementById('run-label')?.remove();
+    const d = document.createElement('div');
+    d.id = 'run-label';
+    d.textContent = text;
+    d.style.cssText = 'position:absolute;top:0;left:0;right:0;z-index:2147483647;background:#111;color:#fff;' +
+                      'font:bold 18px monospace;padding:10px 14px;';
+    document.documentElement.style.paddingTop = '44px';
+    document.documentElement.appendChild(d);
+}"""
+
+
 class Shots:
     def __init__(self, page: Page) -> None:
         self.page = page
         self.n = 0
+        self.last_path: Path | None = None
+        # e.g. "run182-" so files from different runs can be told apart once downloaded
+        self.prefix = f"run{os.environ['GITHUB_RUN_NUMBER']}-" if os.environ.get("GITHUB_RUN_NUMBER") else ""
         SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
     def __call__(self, name: str) -> None:
         self.n += 1
-        path = SCREENSHOT_DIR / f"{self.n:02d}-{name}.png"
+        path = SCREENSHOT_DIR / f"{self.prefix}{self.n:02d}-{name}.png"
         try:
+            self.page.evaluate(BANNER_JS, run_label())
             self.page.screenshot(path=str(path), full_page=True)
+            self.last_path = path
             log(f"screenshot: {path.name}")
         except Exception as exc:  # screenshots must never break the check
             log(f"screenshot failed ({name}): {exc}")
@@ -170,7 +203,7 @@ def run_flow(headed: bool = False) -> tuple[bool, str, Path]:
             log(f"result page url: {page.url}")
             excerpt = " ".join(page.locator("body").inner_text().split())[:400]
             log(f"result page text: {excerpt}")
-            return (not no_slots), excerpt, SCREENSHOT_DIR / f"{shot.n:02d}-result.png"
+            return (not no_slots), excerpt, shot.last_path
         except Exception:
             shot("error")
             raise

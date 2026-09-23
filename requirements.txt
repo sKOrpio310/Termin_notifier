@@ -1,1 +1,2 @@
 playwright>=1.48
+tzdata  # timezone database (Windows has none); used to show Berlin time on screenshots
