@@ -1,22 +1,17 @@
 name: Check appointments
 
+# The time window (06:00-16:00 Berlin) is enforced by the external cron service (cron-job.org),
+# which calls the workflow_dispatch API. GitHub itself runs every dispatch it receives.
 on:
   schedule:
-    # NOTE: if this schedule stops firing after 60 days with no repo pushes/commits, GitHub
-    # auto-disables it — re-enable it from the Actions tab, or push any commit to reactivate it.
-    # Every 5 minutes, 06:00-16:55 Europe/Berlin (GitHub resolves DST via the timezone field,
-    # so this stays correct across summer/winter time with no manual UTC math). The "window"
-    # step below still double-checks 06:00-16:00 as a safety net.
+    # Best-effort backup trigger only; GitHub fires this rarely on low-activity repos.
+    # NOTE: GitHub auto-disables schedules after 60 days with no repo commits.
     - cron: "*/5 6-16 * * *"
       timezone: "Europe/Berlin"
   workflow_dispatch:
     inputs:
       test_email:
         description: "Only send a test email (checks email credentials + recipients), skip the site check"
-        type: boolean
-        default: false
-      ignore_window:
-        description: "Run even outside 06:00-16:00 Berlin time (for manual tests)"
         type: boolean
         default: false
 
@@ -32,36 +27,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Check time window
-        id: window
-        run: |
-          # Every trigger (GitHub schedule, external cron via API dispatch, manual) only runs
-          # 06:00-16:00 Berlin time, unless a manual run ticks ignore_window or test_email.
-          now=$(TZ=Europe/Berlin date +%H%M)
-          if [ "${{ inputs.ignore_window }}" = "true" ] || [ "${{ inputs.test_email }}" = "true" ] || { [ "$((10#$now))" -ge 600 ] && [ "$((10#$now))" -le 1600 ]; }; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Berlin time is $now, outside 06:00-16:00: skipping"
-          fi
+      - uses: actions/checkout@v4
 
-      - if: steps.window.outputs.run == 'true'
-        uses: actions/checkout@v4
-
-      - if: steps.window.outputs.run == 'true'
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
 
-      - if: steps.window.outputs.run == 'true'
-        run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt
 
-      - if: steps.window.outputs.run == 'true'
-        run: python -m playwright install --with-deps chromium
+      - run: python -m playwright install --with-deps chromium
 
       - name: Run check
-        if: steps.window.outputs.run == 'true'
         env:
           # Email backend: Gmail SMTP if GMAIL_APP_PASSWORD is set, otherwise Resend.
           GMAIL_USER: ${{ secrets.GMAIL_USER || vars.GMAIL_USER }}
@@ -79,7 +56,7 @@ jobs:
           fi
 
       - name: Upload screenshots
-        if: always() && steps.window.outputs.run == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: screenshots
@@ -88,7 +65,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Commit status.json
-        if: always() && steps.window.outputs.run == 'true'
+        if: always()
         run: |
           if [ -f status.json ] && ! git diff --quiet -- status.json || [ -n "$(git ls-files --others --exclude-standard status.json)" ]; then
             git config user.name "github-actions[bot]"
