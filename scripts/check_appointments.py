@@ -115,8 +115,15 @@ class Shots:
         self.page = page
         self.n = 0
         self.last_path: Path | None = None
-        # e.g. "run182-" so files from different runs can be told apart once downloaded
-        self.prefix = f"run{os.environ['GITHUB_RUN_NUMBER']}-" if os.environ.get("GITHUB_RUN_NUMBER") else ""
+        # e.g. "2026-09-23_23-03-29_Berlin_run156_" so files sort by time and show which run made them
+        utc = datetime.now(timezone.utc)
+        try:
+            from zoneinfo import ZoneInfo
+            stamp = f"{utc.astimezone(ZoneInfo('Europe/Berlin')):%Y-%m-%d_%H-%M-%S}_Berlin"
+        except Exception:  # no tz database available
+            stamp = f"{utc:%Y-%m-%d_%H-%M-%S}_UTC"
+        run = f"_run{os.environ['GITHUB_RUN_NUMBER']}" if os.environ.get("GITHUB_RUN_NUMBER") else ""
+        self.prefix = f"{stamp}{run}_"
         SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
     def __call__(self, name: str) -> None:
