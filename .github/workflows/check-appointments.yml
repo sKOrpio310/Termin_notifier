@@ -15,6 +15,10 @@ on:
         description: "Only send a test email (checks email credentials + recipients), skip the site check"
         type: boolean
         default: false
+      ignore_window:
+        description: "Run even outside 06:00-16:00 Berlin time (for manual tests)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write # to commit status.json back
@@ -31,9 +35,10 @@ jobs:
       - name: Check time window
         id: window
         run: |
-          # Scheduled runs only happen 06:00-16:00 Berlin time; manual runs always go through.
+          # Every trigger (GitHub schedule, external cron via API dispatch, manual) only runs
+          # 06:00-16:00 Berlin time, unless a manual run ticks ignore_window or test_email.
           now=$(TZ=Europe/Berlin date +%H%M)
-          if [ "${{ github.event_name }}" != "schedule" ] || { [ "$((10#$now))" -ge 600 ] && [ "$((10#$now))" -le 1600 ]; }; then
+          if [ "${{ inputs.ignore_window }}" = "true" ] || [ "${{ inputs.test_email }}" = "true" ] || { [ "$((10#$now))" -ge 600 ] && [ "$((10#$now))" -le 1600 ]; }; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -79,7 +84,7 @@ jobs:
         with:
           name: screenshots
           path: screenshots/
-          retention-days: 3
+          retention-days: 7
           if-no-files-found: ignore
 
       - name: Commit status.json

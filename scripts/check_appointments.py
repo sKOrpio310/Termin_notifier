@@ -22,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -69,6 +70,15 @@ def log(msg: str) -> None:
     print(f"[{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S}Z] {msg}", flush=True)
 
 
+def write_summary(result: str, details: str) -> None:
+    """Show the outcome on the GitHub run page (no-op outside Actions)."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(f"## Result: {result}\n\n_{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S} UTC_\n\n{details}\n")
+
+
 # --------------------------------------------------------------------------- #
 # Browser flow
 # --------------------------------------------------------------------------- #
@@ -110,8 +120,8 @@ def find_service_card(page: Page) -> Locator:
     )
 
 
-def run_flow(headed: bool = False) -> bool:
-    """Return True if appointments look available, False if none."""
+def run_flow(headed: bool = False) -> tuple[bool, str, Path]:
+    """Return (available, visible text of the result page, result screenshot path)."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not headed)
         context = browser.new_context(
@@ -158,7 +168,9 @@ def run_flow(headed: bool = False) -> bool:
                 no_slots = False
             shot("result")
             log(f"result page url: {page.url}")
-            return not no_slots
+            excerpt = " ".join(page.locator("body").inner_text().split())[:400]
+            log(f"result page text: {excerpt}")
+            return (not no_slots), excerpt, SCREENSHOT_DIR / f"{shot.n:02d}-result.png"
         except Exception:
             shot("error")
             raise
@@ -205,18 +217,19 @@ def older_than(iso: str | None, hours: float) -> bool:
 # --------------------------------------------------------------------------- #
 # Email (Resend)
 # --------------------------------------------------------------------------- #
-def send_email(subject: str, text: str) -> None:
+def send_email(subject: str, text: str, attachments: list[Path] | None = None) -> None:
     """Send via Gmail SMTP if GMAIL_APP_PASSWORD is set, otherwise via Resend."""
     recipients = [e.strip() for e in (os.environ.get("NOTIFY_EMAIL_1"), os.environ.get("NOTIFY_EMAIL_2")) if e and e.strip()]
     if not recipients:
         raise RuntimeError("neither NOTIFY_EMAIL_1 nor NOTIFY_EMAIL_2 is set")
+    files = [p for p in (attachments or []) if p.exists()]
     if os.environ.get("GMAIL_APP_PASSWORD", "").strip():
-        _send_gmail(recipients, subject, text)
+        _send_gmail(recipients, subject, text, files)
     else:
-        _send_resend(recipients, subject, text)
+        _send_resend(recipients, subject, text, files)
 
 
-def _send_gmail(recipients: list[str], subject: str, text: str) -> None:
+def _send_gmail(recipients: list[str], subject: str, text: str, files: list[Path]) -> None:
     user = os.environ.get("GMAIL_USER", "").strip()
     password = os.environ["GMAIL_APP_PASSWORD"].replace(" ", "")  # Google shows it in 4-char groups
     if not user:
@@ -226,6 +239,8 @@ def _send_gmail(recipients: list[str], subject: str, text: str) -> None:
     msg["To"] = ", ".join(recipients)
     msg["Subject"] = subject
     msg.set_content(text)
+    for f in files:
+        msg.add_attachment(f.read_bytes(), maintype="image", subtype="png", filename=f.name)
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
             smtp.login(user, password)
@@ -237,7 +252,7 @@ def _send_gmail(recipients: list[str], subject: str, text: str) -> None:
     log(f"email sent via Gmail SMTP from {user} to {len(recipients)} recipient(s)")
 
 
-def _send_resend(recipients: list[str], subject: str, text: str) -> None:
+def _send_resend(recipients: list[str], subject: str, text: str, files: list[Path]) -> None:
     api_key = os.environ.get("RESEND_API_KEY", "").strip()
     sender = os.environ.get("NOTIFY_FROM", "").strip() or "Termin Checker <onboarding@resend.dev>"
     if not api_key:
@@ -245,7 +260,10 @@ def _send_resend(recipients: list[str], subject: str, text: str) -> None:
 
     req = urllib.request.Request(
         "https://api.resend.com/emails",
-        data=json.dumps({"from": sender, "to": recipients, "subject": subject, "text": text}).encode(),
+        data=json.dumps({
+            "from": sender, "to": recipients, "subject": subject, "text": text,
+            "attachments": [{"filename": f.name, "content": base64.b64encode(f.read_bytes()).decode()} for f in files],
+        }).encode(),
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -265,7 +283,8 @@ def availability_email() -> tuple[str, str]:
         "Termin verfügbar: Verpflichtungserklärung (Stuttgart)",
         "Es scheinen Termine für 'Verpflichtungserklärung abgeben' (längerfristige Aufenthalte) "
         f"verfügbar zu sein.\n\nJetzt prüfen und buchen:\n{URL}\n\n"
-        "(Automatische Erkennung: Die Meldung 'Keine verfügbaren Termine' wurde nicht mehr angezeigt.)",
+        "(Automatische Erkennung: Die Meldung 'Keine verfügbaren Termine' wurde nicht mehr angezeigt. "
+        "Ein Screenshot der Ergebnisseite ist angehängt.)",
     )
 
 
@@ -280,6 +299,8 @@ def main() -> int:
     ap.add_argument("--headed", action="store_true", help="show the browser window")
     args = ap.parse_args()
     load_dotenv()
+    for stream in (sys.stdout, sys.stderr):  # page text may contain characters a Windows console can't encode
+        stream.reconfigure(encoding="utf-8", errors="replace")
 
     if args.test_email:
         send_email("Termin Checker: Test-E-Mail", "Wenn du das liest, funktioniert der E-Mail-Versand des Termin-Checkers.")
@@ -289,11 +310,15 @@ def main() -> int:
 
     # 1) Run the check
     try:
-        available = True if args.force_available else run_flow(headed=args.headed)
+        if args.force_available:
+            available, excerpt, result_png = True, "(forced by --force-available, browser skipped)", None
+        else:
+            available, excerpt, result_png = run_flow(headed=args.headed)
     except Exception as exc:
         state["consecutive_failures"] += 1
         n = state["consecutive_failures"]
         log(f"ERROR: check failed ({n} in a row): {type(exc).__name__}: {exc}")
+        write_summary("ERROR", f"`{type(exc).__name__}: {exc}`\n\nFailed runs in a row: {n}. See the `screenshots` artifact.")
         if (
             not args.no_state
             and n >= FAILURES_BEFORE_ALERT
@@ -305,6 +330,7 @@ def main() -> int:
                     f"Der Termin-Checker ist {n}x in Folge fehlgeschlagen.\n\nLetzter Fehler: {type(exc).__name__}: {exc}\n\n"
                     "Vermutlich hat sich die Struktur der Seite geändert. Bitte die GitHub-Action-Logs "
                     "(und die hochgeladenen Screenshots) ansehen.",
+                    attachments=sorted(SCREENSHOT_DIR.glob("*-error.png"))[-1:],
                 )
                 state["last_error_notified_at"] = now().isoformat()
             except Exception as mail_exc:
@@ -317,6 +343,11 @@ def main() -> int:
     state["consecutive_failures"] = 0
     state["last_error_notified_at"] = None
     print("AVAILABLE" if available else "UNAVAILABLE")
+    write_summary(
+        "AVAILABLE" if available else "UNAVAILABLE",
+        f"What the result page said:\n\n> {excerpt}\n\nAll step screenshots are in the `screenshots` artifact "
+        "at the bottom of this page (`*-result.png` is the final page).",
+    )
 
     # 2) Decide whether to notify
     exit_code = 0
@@ -324,7 +355,7 @@ def main() -> int:
         due = not state["available"] or older_than(state["last_notified_at"], REMINDER_HOURS)
         if due and not args.no_state:
             try:
-                send_email(*availability_email())
+                send_email(*availability_email(), attachments=[result_png] if result_png else None)
                 state["available"] = True
                 state["last_notified_at"] = now().isoformat()
             except Exception as exc:
