@@ -318,7 +318,7 @@ def main() -> int:
         state["consecutive_failures"] += 1
         n = state["consecutive_failures"]
         log(f"ERROR: check failed ({n} in a row): {type(exc).__name__}: {exc}")
-        write_summary("ERROR", f"`{type(exc).__name__}: {exc}`\n\nFailed runs in a row: {n}. See the `screenshots` artifact.")
+        write_summary("ERROR", f"`{type(exc).__name__}: {exc}`\n\nFailed runs in a row: {n}. See the `result-screenshot` artifact.")
         if (
             not args.no_state
             and n >= FAILURES_BEFORE_ALERT
@@ -345,8 +345,8 @@ def main() -> int:
     print("AVAILABLE" if available else "UNAVAILABLE")
     write_summary(
         "AVAILABLE" if available else "UNAVAILABLE",
-        f"What the result page said:\n\n> {excerpt}\n\nAll step screenshots are in the `screenshots` artifact "
-        "at the bottom of this page (`*-result.png` is the final page).",
+        f"What the result page said:\n\n> {excerpt}\n\nThe final page screenshot is in the `result-screenshot` "
+        "artifact at the bottom of this page.",
     )
 
     # 2) Decide whether to notify

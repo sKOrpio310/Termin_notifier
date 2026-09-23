@@ -55,12 +55,14 @@ jobs:
             python scripts/check_appointments.py
           fi
 
-      - name: Upload screenshots
+      - name: Upload result screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: screenshots
-          path: screenshots/
+          name: result-screenshot
+          path: |
+            screenshots/*-result.png
+            screenshots/*-error.png
           retention-days: 7
           if-no-files-found: ignore
 

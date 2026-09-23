@@ -55,7 +55,8 @@ Also make sure **Settings → Actions → General → Workflow permissions** is 
 ### 3. Run it
 Repo → **Actions → Check appointments → Run workflow**.
 Tick **test_email** to only send a test mail (verifies key and recipients without touching the site).
-Screenshots of every step are attached to each run as the `screenshots` artifact.
+The final result-page screenshot is attached to each run as the `result-screenshot` artifact (an `*-error.png`
+is included instead if a step failed). The run's summary shows the text the site displayed.
 
 ## Changing the schedule
 GitHub's own `schedule:` trigger fires unreliably on new, low-activity repos, so the **primary trigger is an external
