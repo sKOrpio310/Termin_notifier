@@ -47,9 +47,10 @@ STATE_FILE = Path(os.environ.get("STATE_FILE", ROOT / "status.json"))
 SCREENSHOT_DIR = Path(os.environ.get("SCREENSHOT_DIR", ROOT / "screenshots"))
 
 REMINDER_HOURS = 6          # re-notify this often while slots stay available
-FAILURES_BEFORE_ALERT = 3   # consecutive failed runs before a "checker broke" email
+FAILURES_BEFORE_ALERT = 8   # consecutive failed runs (~15 min at one run every 2 minutes) before a "checker broke" email
 ERROR_REMINDER_HOURS = 24   # don't repeat the "checker broke" email more often than this
 STEP_TIMEOUT_MS = 20_000
+ATTEMPTS = 2                # retry the browser flow once per run; the site has short outages
 
 
 def load_dotenv(path: Path = ROOT / ".env") -> None:
@@ -219,6 +220,16 @@ def run_flow(headed: bool = False) -> tuple[bool, str, Path]:
             browser.close()
 
 
+def run_flow_with_retry(headed: bool = False) -> tuple[bool, str, Path]:
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            return run_flow(headed=headed)
+        except Exception as exc:
+            if attempt == ATTEMPTS:
+                raise
+            log(f"attempt {attempt}/{ATTEMPTS} failed ({type(exc).__name__}: {exc}); retrying")
+
+
 # --------------------------------------------------------------------------- #
 # State
 # --------------------------------------------------------------------------- #
@@ -353,7 +364,7 @@ def main() -> int:
         if args.force_available:
             available, excerpt, result_png = True, "(forced by --force-available, browser skipped)", None
         else:
-            available, excerpt, result_png = run_flow(headed=args.headed)
+            available, excerpt, result_png = run_flow_with_retry(headed=args.headed)
     except Exception as exc:
         state["consecutive_failures"] += 1
         n = state["consecutive_failures"]

@@ -2,7 +2,7 @@
 
 Checks the Stuttgart Ausländerbehörde booking site for a free
 **"Verpflichtungserklärung abgeben" → "längerfristige Aufenthalte"** appointment every
-5 minutes (06:00–16:00 Berlin time) via GitHub Actions and emails you (via Gmail SMTP or [Resend](https://resend.com)) when one opens up.
+2 minutes (06:00–23:00 Berlin time) via GitHub Actions and emails you (via Gmail SMTP or [Resend](https://resend.com)) when one opens up.
 
 - Script: `scripts/check_appointments.py` (Python + Playwright, headless Chromium). Prints `AVAILABLE` / `UNAVAILABLE`.
 - Workflow: `.github/workflows/check-appointments.yml`
@@ -14,7 +14,9 @@ Checks the Stuttgart Ausländerbehörde booking site for a free
 |---|---|
 | unavailable → available | "Termin verfügbar" alert |
 | still available | reminder every 6 hours (`REMINDER_HOURS` in the script) |
-| check fails 3 runs in a row (site changed, timeout, …) | one "Termin Checker ist kaputt" mail, repeated at most every 24 h |
+| check fails 8 runs in a row (`FAILURES_BEFORE_ALERT`; site changed, timeout, …) | one "Termin Checker ist kaputt" mail, repeated at most every 24 h |
+
+Each run retries the browser flow once before counting as failed, so short site hiccups don't fail the run.
 
 "Available" simply means the result page no longer shows *"Keine verfügbaren Termine"*. The script doesn't parse
 the calendar, so open the site and check.
@@ -61,13 +63,15 @@ is included instead if a step failed). The run's summary shows the text the site
 ## Changing the schedule
 GitHub's own `schedule:` trigger fires unreliably on new, low-activity repos, so the **primary trigger is an external
 cron job on [cron-job.org](https://cron-job.org)** that calls GitHub's `workflow_dispatch` API. **That job decides
-when checks happen** (currently every 5 minutes, 06:00–16:00 Europe/Berlin): change the interval or hours in the
+when checks happen** (currently every 2 minutes, 06:00–23:00 Europe/Berlin): change the interval or hours in the
 cron-job.org dashboard (set the job's timezone to Europe/Berlin). The workflow itself runs every dispatch it receives,
 at any hour, with no time check of its own.
 
 The `schedule:` block in `.github/workflows/check-appointments.yml` is only a best-effort backup
-(`*/5 6-16`, timezone Europe/Berlin). GitHub also disables scheduled workflows in repos with 60 days of no activity.
-Please stay polite to the site: don't go more frequent than every 5 minutes.
+(`*/5 6-22`, timezone Europe/Berlin). GitHub also disables scheduled workflows in repos with 60 days of no activity.
+A run takes about a minute (longer when the site is slow or a retry kicks in), so runs can occasionally overlap. The workflow's `concurrency` group runs
+them one at a time: a dispatch that arrives while another is still waiting replaces it (the replaced one shows as
+"cancelled"), and a check that is already running is never interrupted.
 
 ## Running locally
 ```bash
