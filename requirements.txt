@@ -1,2 +1,2 @@
-playwright>=1.48
+playwright==1.63.0  # must match the Playwright container image tag in .github/workflows/check-appointments.yml
 tzdata  # timezone database (Windows has none); used to show Berlin time on screenshots

@@ -27,24 +27,17 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Official Playwright image: Python, Chromium and its system libraries are preinstalled, so runs
+    # don't depend on Ubuntu's (sometimes very slow) package mirrors.
+    # Keep the tag in sync with the playwright version pinned in requirements.txt.
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.63.0-noble
+      options: --ipc=host # recommended for Chromium in Docker
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-          cache: pip
-
       - run: pip install -r requirements.txt
-
-      # Cache the downloaded browser so frequent runs start faster (system deps are still installed).
-      - uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
-
-      - run: python -m playwright install --with-deps chromium
 
       - name: Run check
         env:
