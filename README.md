@@ -61,14 +61,13 @@ The final result-page screenshot is attached to each run as the `result-screensh
 is included instead if a step failed). The run's summary shows the text the site displayed.
 
 ## Changing the schedule
-GitHub's own `schedule:` trigger fires unreliably on new, low-activity repos, so the **primary trigger is an external
+GitHub's own `schedule:` trigger fires unreliably on new, low-activity repos, so the **only trigger is an external
 cron job on [cron-job.org](https://cron-job.org)** that calls GitHub's `workflow_dispatch` API. **That job decides
 when checks happen** (currently every 2 minutes, 06:00–23:00 Europe/Berlin): change the interval or hours in the
 cron-job.org dashboard (set the job's timezone to Europe/Berlin). The workflow itself runs every dispatch it receives,
 at any hour, with no time check of its own.
 
-The `schedule:` block in `.github/workflows/check-appointments.yml` is only a best-effort backup
-(`*/5 6-22`, timezone Europe/Berlin). GitHub also disables scheduled workflows in repos with 60 days of no activity.
+The workflow has no `schedule:` trigger of its own, so if the cron-job.org job stops, no checks run.
 A run takes about a minute (longer when the site is slow or a retry kicks in), so runs can occasionally overlap. The workflow's `concurrency` group runs
 them one at a time: a dispatch that arrives while another is still waiting replaces it (the replaced one shows as
 "cancelled"), and a check that is already running is never interrupted.
