@@ -3,14 +3,14 @@ name: Check appointments (loop)
 # Triggered from outside (e.g. cron-job.org calling the workflow_dispatch API), like the regular checker.
 # Each run keeps one browser session open and rechecks via Zurück -> Weiter until slots appear or
 # `minutes` have passed. GitHub kills any job after 6 hours, so runs are time-boxed and the external
-# trigger starts the next one (e.g. hourly with the default 58 minutes).
+# trigger starts the next one (e.g. hourly with the default 55 minutes).
 on:
   workflow_dispatch:
     inputs:
       minutes:
         description: "How long this run keeps rechecking (max ~340)"
         type: number
-        default: 58
+        default: 55
       recheck_seconds:
         description: "Pause between Zurück -> Weiter rechecks"
         type: number
@@ -46,7 +46,7 @@ jobs:
           NOTIFY_FROM: ${{ vars.NOTIFY_FROM }}
         run: |
           python scripts/check_appointments_loop.py \
-            --minutes "${{ inputs.minutes || 58 }}" \
+            --minutes "${{ inputs.minutes || 55 }}" \
             --recheck-seconds "${{ inputs.recheck_seconds || 30 }}"
 
       - name: Upload result screenshot
