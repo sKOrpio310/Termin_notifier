@@ -1,0 +1,74 @@
+name: Check appointments (loop)
+
+# Triggered from outside (e.g. cron-job.org calling the workflow_dispatch API), like the regular checker.
+# Each run keeps one browser session open and rechecks via Zurück -> Weiter until slots appear or
+# `minutes` have passed. GitHub kills any job after 6 hours, so runs are time-boxed and the external
+# trigger starts the next one (e.g. hourly with the default 58 minutes).
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "How long this run keeps rechecking (max ~340)"
+        type: number
+        default: 58
+      recheck_seconds:
+        description: "Pause between Zurück -> Weiter rechecks"
+        type: number
+        default: 30
+
+permissions:
+  contents: write # to commit status-loop.json back
+
+# One loop at a time; a dispatch that arrives while one is running waits (a newer one replaces it).
+concurrency:
+  group: check-appointments-loop
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.63.0-noble
+      options: --ipc=host
+    timeout-minutes: 355 # just under GitHub's 6-hour hard limit
+    steps:
+      - uses: actions/checkout@v7
+
+      - run: pip install -r requirements.txt
+
+      - name: Run loop check
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER || vars.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          NOTIFY_EMAIL_1: ${{ secrets.NOTIFY_EMAIL_1 || vars.NOTIFY_EMAIL_1 }}
+          NOTIFY_EMAIL_2: ${{ secrets.NOTIFY_EMAIL_2 || vars.NOTIFY_EMAIL_2 }}
+          NOTIFY_FROM: ${{ vars.NOTIFY_FROM }}
+        run: |
+          python scripts/check_appointments_loop.py \
+            --minutes "${{ inputs.minutes || 58 }}" \
+            --recheck-seconds "${{ inputs.recheck_seconds || 30 }}"
+
+      - name: Upload result screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: loop-result-screenshot-run${{ github.run_number }}
+          path: |
+            screenshots/*-result.png
+            screenshots/*-error.png
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Commit status-loop.json
+        if: always()
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [ -f status-loop.json ] && ! git diff --quiet -- status-loop.json || [ -n "$(git ls-files --others --exclude-standard status-loop.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add status-loop.json
+            git commit -m "chore: update status-loop.json"
+            git pull --rebase --autostash
+            git push
+          fi
