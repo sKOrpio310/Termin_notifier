@@ -27,16 +27,16 @@ ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("STATE_FILE", str(ROOT / "status-loop.json"))  # must be set before the import below
 
 from playwright.sync_api import Page, sync_playwright  # noqa: E402
-from playwright.sync_api import TimeoutError as PlaywrightTimeout  # noqa: E402
 
 import check_appointments as base  # noqa: E402
 from check_appointments import (  # noqa: E402
-    NO_SLOTS_RE, OPTION, SERVICE, STEP_TIMEOUT_MS, URL,
-    Shots, availability_email, click_weiter, find_service_card, load_dotenv, load_state, log, now,
-    older_than, save_state, send_email, write_summary,
+    OPTION, SERVICE, STEP_TIMEOUT_MS, URL,
+    Shots, SiteError, availability_email, click_weiter, find_service_card, load_dotenv, load_state, log, now,
+    older_than, read_result, save_state, send_email, write_summary,
 )
 
 MAX_ATTEMPTS = 5  # restart the whole flow (e.g. after the site's session expires) at most this often per run
+MAX_SITE_ERRORS = 3  # consecutive site error pages before restarting the flow with a fresh session
 
 
 def click_zurueck(page: Page) -> None:
@@ -48,17 +48,6 @@ def click_zurueck(page: Page) -> None:
     ).first
     button.scroll_into_view_if_needed()
     button.click()
-
-
-def read_result(page: Page) -> tuple[bool, str]:
-    """On the result page: return (no slots, visible text excerpt)."""
-    page.wait_for_load_state("networkidle")
-    try:
-        page.get_by_text(NO_SLOTS_RE).first.wait_for(state="visible", timeout=15_000)
-        no_slots = True
-    except PlaywrightTimeout:
-        no_slots = False
-    return no_slots, " ".join(page.locator("body").inner_text().split())[:400]
 
 
 def run_loop(deadline: float, recheck_s: float, headed: bool = False) -> tuple[bool, str, Path, int]:
@@ -88,6 +77,7 @@ def run_loop(deadline: float, recheck_s: float, headed: bool = False) -> tuple[b
             click_weiter(page)
             no_slots, excerpt = read_result(page)
             checks = 1
+            site_errors = 0
             log(f"check {checks}: {'no slots' if no_slots else 'SLOTS?'} | {excerpt[:120]}")
 
             while no_slots and time.monotonic() + recheck_s < deadline:
@@ -96,8 +86,18 @@ def run_loop(deadline: float, recheck_s: float, headed: bool = False) -> tuple[b
                 page.get_by_text("Ihre gewählte Leistung").first.wait_for(state="visible")
                 page.wait_for_load_state("networkidle")
                 click_weiter(page)
-                no_slots, excerpt = read_result(page)
                 checks += 1
+                try:
+                    no_slots, excerpt = read_result(page)
+                    site_errors = 0
+                except SiteError as exc:
+                    # Not a result: keep looping (Zurück -> Weiter again) instead of reporting "available".
+                    site_errors += 1
+                    if site_errors >= MAX_SITE_ERRORS:
+                        raise
+                    log(f"check {checks}: site error, rechecking ({exc})")
+                    no_slots = True
+                    continue
                 log(f"check {checks}: {'no slots' if no_slots else 'SLOTS?'}")
 
             shot("result")
@@ -171,7 +171,7 @@ def main() -> int:
         due = not state["available"] or older_than(state["last_notified_at"], base.REMINDER_HOURS)
         if due and not args.no_state:
             try:
-                send_email(*availability_email(), attachments=[result_png] if result_png else None)
+                send_email(*availability_email(excerpt), attachments=[result_png] if result_png else None)
                 state["available"] = True
                 state["last_notified_at"] = now().isoformat()
             except Exception as exc:

@@ -41,6 +41,16 @@ URL = "https://stuttgart.konsentas.de/form/7/?signup_new=1"
 SERVICE = "Verpflichtungserklärung abgeben"
 OPTION = "längerfristige Aufenthalte"
 NO_SLOTS_RE = re.compile(r"Keine verfügbaren Termine|keine Termine mehr verfügbar", re.I)
+# The site's own error page ("Fehler beim Laden des Kalenders aufgetreten / Fehler bei der Anfrage an den Server...").
+# It also lacks the "no slots" message, so without this check it would count as "available".
+SITE_ERROR_RE = re.compile(r"Fehler beim Laden des Kalenders|Fehler bei der Anfrage an den Server", re.I)
+# The calendar page shown when slots exist: "Bitte wählen Sie ein Datum", a month view, and on the right the first
+# free day ("3. Dezember 2026 / Donnerstag / 11:15 · 1 Termin frei").
+SLOTS_RE = re.compile(r"Bitte wählen Sie ein Datum|\d+\s+Termine?\s+frei", re.I)
+FREE_RE = re.compile(r"\d+\s+Termine?\s+frei", re.I)
+_MONTHS = "Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember"
+DAY_RE = re.compile(rf"\d{{1,2}}\.\s*(?:{_MONTHS})\s+\d{{4}}")
+TIME_FREE_RE = re.compile(r"(\d{1,2}:\d{2})\D{0,10}?(\d+\s+Termine?\s+frei)", re.I)  # "11:15 ● 1 Termin frei"
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE_FILE = Path(os.environ.get("STATE_FILE", ROOT / "status.json"))
@@ -150,6 +160,41 @@ def click_weiter(page: Page) -> None:
     button.click()
 
 
+class SiteError(Exception):
+    """The result page showed the site's own error message instead of a result."""
+
+
+def slot_summary(text: str) -> str:
+    """'3. Dezember 2026, 11:15 (1 Termin frei)' from the calendar page text, or '' if not found."""
+    day = DAY_RE.search(text)
+    times = ", ".join(dict.fromkeys(f"{t} ({n})" for t, n in TIME_FREE_RE.findall(text)))  # dedupe, keep order
+    return ", ".join(s for s in (day.group(0) if day else "", times) if s)
+
+
+def read_result(page: Page) -> tuple[bool, str]:
+    """On the result page: return (no slots, visible text excerpt). Raises SiteError on the site's error page.
+
+    When slots are shown, the excerpt starts with slot_summary() (e.g. '3. Dezember 2026, 11:15 (1 Termin frei) | ...').
+    """
+    page.wait_for_load_state("networkidle")
+    try:
+        (page.get_by_text(NO_SLOTS_RE).or_(page.get_by_text(SITE_ERROR_RE)).or_(page.get_by_text(SLOTS_RE))
+         .first.wait_for(state="visible", timeout=15_000))
+    except PlaywrightTimeout:
+        pass  # none of the known pages: treated as "available" below so nothing is missed
+    if page.get_by_text(SITE_ERROR_RE).first.is_visible():
+        raise SiteError(f"site error page: {' '.join(page.locator('body').inner_text().split())[:200]}")
+    if page.get_by_text(NO_SLOTS_RE).first.is_visible():
+        return True, " ".join(page.locator("body").inner_text().split())[:400]
+    try:  # the free-times panel may render a moment after the calendar
+        page.get_by_text(FREE_RE).first.wait_for(state="visible", timeout=3_000)
+    except PlaywrightTimeout:
+        pass
+    text = " ".join(page.locator("body").inner_text().split())
+    summary = slot_summary(text)
+    return False, (f"{summary} | " if summary else "") + text[:400]
+
+
 def find_service_card(page: Page) -> Locator:
     # Innermost element that contains both the service title and an "Optionen" control.
     # Ancestors come first in DOM order, so .last is the tightest match.
@@ -201,15 +246,9 @@ def run_flow(headed: bool = False) -> tuple[bool, str, Path]:
 
             log("6/6 Weiter -> result page")
             click_weiter(page)
-            page.wait_for_load_state("networkidle")
-            try:
-                page.get_by_text(NO_SLOTS_RE).first.wait_for(state="visible", timeout=15_000)
-                no_slots = True
-            except PlaywrightTimeout:
-                no_slots = False
+            no_slots, excerpt = read_result(page)  # raises SiteError -> error screenshot + retry
             shot("result")
             log(f"result page url: {page.url}")
-            excerpt = " ".join(page.locator("body").inner_text().split())[:400]
             log(f"result page text: {excerpt}")
             return (not no_slots), excerpt, shot.last_path
         except Exception:
@@ -329,11 +368,15 @@ def _send_resend(recipients: list[str], subject: str, text: str, files: list[Pat
         raise RuntimeError(f"Resend API error {exc.code}: {exc.read().decode()[:500]}") from exc
 
 
-def availability_email() -> tuple[str, str]:
+def availability_email(excerpt: str = "") -> tuple[str, str]:
+    summary = slot_summary(excerpt)
+    subject = f"Termin verfügbar: {summary} –" if summary else "Termin verfügbar:"
+    first_slot = f"Erster freier Termin: {summary}\n\n" if summary else ""
     return (
-        "Termin verfügbar: Verpflichtungserklärung (Stuttgart)",
+        f"{subject} Verpflichtungserklärung (Stuttgart)",
         "Es scheinen Termine für 'Verpflichtungserklärung abgeben' (längerfristige Aufenthalte) "
-        f"verfügbar zu sein.\n\nJetzt prüfen und buchen:\n{URL}\n\n"
+        f"verfügbar zu sein.\n\n{first_slot}"
+        f"Jetzt prüfen und buchen (einzelne Termine sind oft nach 1-2 Minuten weg):\n{URL}\n\n"
         "(Automatische Erkennung: Die Meldung 'Keine verfügbaren Termine' wurde nicht mehr angezeigt. "
         "Ein Screenshot der Ergebnisseite ist angehängt.)",
     )
@@ -406,7 +449,7 @@ def main() -> int:
         due = not state["available"] or older_than(state["last_notified_at"], REMINDER_HOURS)
         if due and not args.no_state:
             try:
-                send_email(*availability_email(), attachments=[result_png] if result_png else None)
+                send_email(*availability_email(excerpt), attachments=[result_png] if result_png else None)
                 state["available"] = True
                 state["last_notified_at"] = now().isoformat()
             except Exception as exc:
