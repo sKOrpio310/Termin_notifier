@@ -3,26 +3,26 @@ name: Check appointments (loop)
 # Triggered from outside (e.g. cron-job.org calling the workflow_dispatch API), like the regular checker.
 # Each run keeps one browser session open and rechecks via Zurück -> Weiter until slots appear or
 # `minutes` have passed. GitHub kills any job after 6 hours, so runs are time-boxed and the external
-# trigger starts the next one (e.g. hourly with the default 55 minutes).
+# trigger starts the next one (e.g. hourly). The default 65 minutes is longer than that hour on purpose: the next
+# run starts while this one is still checking, so there is no gap around the full hour (when slots tend to appear).
+# Each check takes ~11 s on the site's side (its first-available-slot API is slow) plus the pause, so with the
+# default 15 s pause the loop looks about every 26 s.
 on:
   workflow_dispatch:
     inputs:
       minutes:
         description: "How long this run keeps rechecking (max ~340)"
         type: number
-        default: 55
+        default: 65
       recheck_seconds:
         description: "Pause between Zurück -> Weiter rechecks"
         type: number
-        default: 30
+        default: 15
 
 permissions:
   contents: write # to commit status-loop.json back
 
-# One loop at a time; a dispatch that arrives while one is running waits (a newer one replaces it).
-concurrency:
-  group: check-appointments-loop
-  cancel-in-progress: false
+# No concurrency group on purpose: consecutive runs must overlap (see above), so a new dispatch starts right away.
 
 jobs:
   check:
@@ -46,8 +46,8 @@ jobs:
           NOTIFY_FROM: ${{ vars.NOTIFY_FROM }}
         run: |
           python scripts/check_appointments_loop.py \
-            --minutes "${{ inputs.minutes || 55 }}" \
-            --recheck-seconds "${{ inputs.recheck_seconds || 30 }}"
+            --minutes "${{ inputs.minutes || 65 }}" \
+            --recheck-seconds "${{ inputs.recheck_seconds || 15 }}"
 
       - name: Upload result screenshot
         if: always()
@@ -64,7 +64,15 @@ jobs:
         if: always()
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          if [ -f status-loop.json ] && ! git diff --quiet -- status-loop.json || [ -n "$(git ls-files --others --exclude-standard status-loop.json)" ]; then
+          [ -f status-loop.json ] || exit 0
+          # Overlapping runs can both change status-loop.json after checking out, which would make the rebase
+          # conflict. Write this run's state on top of the latest main instead (the newest state wins).
+          state="$(mktemp)"
+          cp status-loop.json "$state"
+          git fetch -q origin "$GITHUB_REF_NAME"
+          git reset -q --hard FETCH_HEAD
+          cp "$state" status-loop.json
+          if ! git diff --quiet -- status-loop.json || [ -n "$(git ls-files --others --exclude-standard status-loop.json)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add status-loop.json

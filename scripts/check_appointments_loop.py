@@ -10,7 +10,7 @@ regular checker. Reuses the regular checker's helpers (email, state, screenshots
 without changing them.
 
 Usage:
-    python scripts/check_appointments_loop.py                       # loop 8 min, recheck every 30 s
+    python scripts/check_appointments_loop.py                       # loop 8 min, recheck every 15 s
     python scripts/check_appointments_loop.py --minutes 2 --recheck-seconds 20
     python scripts/check_appointments_loop.py --no-state --headed   # dry run with a visible browser
 """
@@ -126,7 +126,7 @@ def run_with_restarts(deadline: float, recheck_s: float, headed: bool) -> tuple[
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=8, help="how long to keep rechecking")
-    ap.add_argument("--recheck-seconds", type=float, default=30, help="pause between Zurück -> Weiter rechecks")
+    ap.add_argument("--recheck-seconds", type=float, default=15, help="pause between Zurück -> Weiter rechecks")
     ap.add_argument("--no-state", action="store_true", help="dry run: no state file, no emails")
     ap.add_argument("--headed", action="store_true", help="show the browser window")
     args = ap.parse_args()
