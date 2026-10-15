@@ -34,7 +34,7 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 
-from playwright.sync_api import Locator, Page, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, Locator, Page, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 URL = "https://stuttgart.konsentas.de/form/7/?signup_new=1"
@@ -206,14 +206,24 @@ def find_service_card(page: Page) -> Locator:
     )
 
 
+def new_context(browser: Browser) -> BrowserContext:
+    # The site answers "no slots" to requests whose user agent says "HeadlessChrome" (verified 2026-10-15: same
+    # moment, headless saw termin=null, a normal Chrome UA saw a free slot), so present the regular Chrome UA.
+    page = browser.new_page()
+    user_agent = page.evaluate("navigator.userAgent").replace("HeadlessChrome", "Chrome")
+    page.close()
+    context = browser.new_context(
+        locale="de-DE", timezone_id="Europe/Berlin", viewport={"width": 1280, "height": 1600}, user_agent=user_agent
+    )
+    context.set_default_timeout(STEP_TIMEOUT_MS)
+    return context
+
+
 def run_flow(headed: bool = False) -> tuple[bool, str, Path]:
     """Return (available, visible text of the result page, result screenshot path)."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not headed)
-        context = browser.new_context(
-            locale="de-DE", timezone_id="Europe/Berlin", viewport={"width": 1280, "height": 1600}
-        )
-        context.set_default_timeout(STEP_TIMEOUT_MS)
+        context = new_context(browser)
         page = context.new_page()
         shot = Shots(page)
         try:

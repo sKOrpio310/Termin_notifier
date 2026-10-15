@@ -30,8 +30,8 @@ from playwright.sync_api import Page, sync_playwright  # noqa: E402
 
 import check_appointments as base  # noqa: E402
 from check_appointments import (  # noqa: E402
-    OPTION, SERVICE, STEP_TIMEOUT_MS, URL,
-    Shots, SiteError, availability_email, click_weiter, find_service_card, load_dotenv, load_state, log, now,
+    OPTION, SERVICE, URL,
+    Shots, SiteError, availability_email, click_weiter, find_service_card, load_dotenv, load_state, log, new_context, now,
     older_than, read_result, save_state, send_email, write_summary,
 )
 
@@ -54,10 +54,7 @@ def run_loop(deadline: float, recheck_s: float, headed: bool = False) -> tuple[b
     """Return (available, result page text, result screenshot path, number of checks)."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not headed)
-        context = browser.new_context(
-            locale="de-DE", timezone_id="Europe/Berlin", viewport={"width": 1280, "height": 1600}
-        )
-        context.set_default_timeout(STEP_TIMEOUT_MS)
+        context = new_context(browser)
         page = context.new_page()
         shot = Shots(page)
         try:
