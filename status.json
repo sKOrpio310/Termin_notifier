@@ -1,6 +1,6 @@
 {
   "available": false,
-  "consecutive_failures": 2,
+  "consecutive_failures": 3,
   "last_error_notified_at": null,
   "last_notified_at": null
 }
