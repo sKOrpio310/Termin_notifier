@@ -1,6 +1,6 @@
 {
   "available": true,
-  "consecutive_failures": 0,
+  "consecutive_failures": 1,
   "last_error_notified_at": null,
   "last_notified_at": "2026-11-20T12:59:34.675511+00:00"
 }
